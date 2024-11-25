@@ -3,11 +3,15 @@ import { Header } from '@/components/Header';
 import { PromptQueue } from '@/components/PromptQueue';
 import { ImageGrid } from '@/components/ImageGrid';
 import { SessionManager } from '@/components/SessionManager';
+import { AudioTranscriber } from '@/components/AudioTranscriber';
+import { PDFValidator } from '@/components/PDFValidator';
+import { TranscriptEditor } from '@/components/TranscriptEditor';
 import { mockPrompts } from '@/lib/mockData';
-import { generateImage } from '@/lib/api';
+import { generateImage, validateTranscriptWithClaude } from '@/lib/api';
 import { generateReadableId } from '@/lib/nameGenerator';
 import { toast } from 'sonner';
-import { GeneratedImage, Session } from '@/lib/types';
+import { GeneratedImage, Session, TranscriptWord, Transcript } from '@/lib/types';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>(() => {
@@ -15,7 +19,7 @@ function App() {
       id: generateReadableId(),
       name: 'New Session',
       timestamp: Date.now(),
-      promptQueue: [...mockPrompts], // Create a new array to avoid mutations
+      promptQueue: [...mockPrompts],
       currentPrompt: 0
     };
     return [initialSession];
@@ -26,8 +30,11 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [currentBatchSize, setCurrentBatchSize] = useState(4);
+  
+  // New state for transcript and PDF
+  const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [pdfText, setPdfText] = useState<string | null>(null);
 
-  // Update currentSession when sessions change
   useEffect(() => {
     const updatedSession = sessions.find(s => s.id === currentSession.id);
     if (updatedSession) {
@@ -102,6 +109,52 @@ function App() {
     }
   };
 
+  const handleTranscriptionComplete = (text: string, words: TranscriptWord[]) => {
+    setTranscript({
+      text,
+      words,
+    });
+  };
+
+  const handlePDFLoaded = async (text: string) => {
+    setPdfText(text);
+    if (transcript) {
+      try {
+        toast.loading('Validating transcript with Claude...');
+        const validation = await validateTranscriptWithClaude(transcript.text, text);
+        
+        setTranscript(prev => ({
+          ...prev!,
+          pdfValidation: validation
+        }));
+
+        // Add the generated prompts to the current session
+        setSessions(prev => prev.map(session =>
+          session.id === currentSession.id
+            ? {
+                ...session,
+                promptQueue: [...session.promptQueue, ...validation.thumbnailPrompts]
+              }
+            : session
+        ));
+
+        toast.success('Transcript validated successfully');
+      } catch (error) {
+        console.error('Validation error:', error);
+        toast.error('Failed to validate transcript');
+      }
+    }
+  };
+
+  const handleTranscriptEdit = (newText: string) => {
+    if (transcript) {
+      setTranscript(prev => ({
+        ...prev!,
+        editedText: newText
+      }));
+    }
+  };
+
   const handleDeleteImages = (imageIds: string[]) => {
     setGeneratedImages(prev => prev.filter(img => !imageIds.includes(img.id)));
     toast.success(`Deleted ${imageIds.length} images`);
@@ -112,7 +165,7 @@ function App() {
       id: generateReadableId(),
       name: `Session ${sessions.length + 1}`,
       timestamp: Date.now(),
-      promptQueue: [...mockPrompts], // Create a new array to avoid mutations
+      promptQueue: [...mockPrompts],
       currentPrompt: 0
     };
     setSessions(prev => [...prev, newSession]);
@@ -134,42 +187,6 @@ function App() {
     ));
   };
 
-  const handlePromptEdit = (index: number, newPrompt: string) => {
-    setSessions(prev => prev.map(session => 
-      session.id === currentSession.id 
-        ? {
-            ...session,
-            promptQueue: session.promptQueue.map((p, i) => 
-              i === index ? newPrompt : p
-            )
-          }
-        : session
-    ));
-  };
-
-  const handlePromptDelete = (index: number) => {
-    setSessions(prev => prev.map(session =>
-      session.id === currentSession.id
-        ? {
-            ...session,
-            promptQueue: session.promptQueue.filter((_, i) => i !== index),
-            currentPrompt: Math.min(session.currentPrompt, session.promptQueue.length - 2)
-          }
-        : session
-    ));
-  };
-
-  const handlePromptAdd = (prompt: string) => {
-    setSessions(prev => prev.map(session =>
-      session.id === currentSession.id
-        ? {
-            ...session,
-            promptQueue: [...session.promptQueue, prompt]
-          }
-        : session
-    ));
-  };
-
   const currentSessionImages = generatedImages.filter(
     img => img.sessionId === currentSession.id
   );
@@ -179,40 +196,70 @@ function App() {
       <div className="max-w-7xl mx-auto space-y-8">
         <Header />
         
-        <div className="flex gap-6">
-          <div className="space-y-4">
-            <SessionManager
-              sessions={sessions}
-              currentSession={currentSession}
-              onSessionSelect={setCurrentSession}
-              onSessionCreate={handleCreateSession}
-              onSessionDelete={handleDeleteSession}
-              onSessionRename={handleSessionRename}
-            />
-            
-            <PromptQueue 
-              prompts={currentSession.promptQueue}
-              currentPrompt={currentSession.currentPrompt}
-              onPromptClick={handlePromptClick}
-              onPromptEdit={handlePromptEdit}
-              onPromptDelete={handlePromptDelete}
-              onPromptAdd={handlePromptAdd}
-              isGenerating={isGenerating}
-            />
-          </div>
-          
-          <div className="flex-1">
-            <ImageGrid 
-              images={currentSessionImages}
-              onGenerateVariations={handleGenerateVariations}
-              onDeleteImages={handleDeleteImages}
-              isGenerating={isGenerating}
-              highlightedId={highlightedId}
-              onHighlight={setHighlightedId}
-              batchSize={currentBatchSize}
-            />
-          </div>
-        </div>
+        <Tabs defaultValue="images" className="w-full">
+          <TabsList>
+            <TabsTrigger value="images">Image Generation</TabsTrigger>
+            <TabsTrigger value="transcript">Transcript & PDF</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="images" className="space-y-6">
+            <div className="flex gap-6">
+              <div className="space-y-4">
+                <SessionManager
+                  sessions={sessions}
+                  currentSession={currentSession}
+                  onSessionSelect={setCurrentSession}
+                  onSessionCreate={handleCreateSession}
+                  onSessionDelete={handleDeleteSession}
+                  onSessionRename={handleSessionRename}
+                />
+                
+                <PromptQueue 
+                  prompts={currentSession.promptQueue}
+                  currentPrompt={currentSession.currentPrompt}
+                  onPromptClick={handlePromptClick}
+                  onPromptEdit={() => {}}
+                  onPromptDelete={() => {}}
+                  onPromptAdd={() => {}}
+                  isGenerating={isGenerating}
+                />
+              </div>
+              
+              <div className="flex-1">
+                <ImageGrid 
+                  images={currentSessionImages}
+                  onGenerateVariations={handleGenerateVariations}
+                  onDeleteImages={handleDeleteImages}
+                  isGenerating={isGenerating}
+                  highlightedId={highlightedId}
+                  onHighlight={setHighlightedId}
+                  batchSize={currentBatchSize}
+                />
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="transcript" className="space-y-6">
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <AudioTranscriber onTranscriptionComplete={handleTranscriptionComplete} />
+                <PDFValidator onPDFLoaded={handlePDFLoaded} />
+              </div>
+              
+              {transcript && (
+                <div className="space-y-4">
+                  <TranscriptEditor
+                    transcript={transcript.text}
+                    words={transcript.words}
+                    editedTranscript={transcript.editedText}
+                    onTranscriptEdit={handleTranscriptEdit}
+                    validation={transcript.pdfValidation}
+                  />
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
