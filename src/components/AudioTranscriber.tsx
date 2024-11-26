@@ -1,12 +1,10 @@
 import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Loader2, FileAudio, Check } from 'lucide-react';
+import { Loader2, FileAudio } from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { transcribeAudio } from '@/lib/api';
 import { TranscriptWord } from '@/lib/types';
-import { ScrollArea } from './ui/scroll-area';
 import { AudioPlayer } from './AudioPlayer';
 
 interface AudioTranscriberProps {
@@ -66,7 +64,13 @@ export function AudioTranscriber({ onTranscriptionComplete, onTimeUpdate }: Audi
           onTimeUpdate={onTimeUpdate}
         />
       ) : (
-        <div {...getRootProps()}>
+        <div
+          {...getRootProps()}
+          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+            ${isDragActive ? 'border-purple-500 bg-purple-500/10' : 'border-muted'}
+            ${isTranscribing ? 'opacity-50 cursor-not-allowed' : ''}
+          `}
+        >
           <input {...getInputProps()} />
           <div className="flex flex-col items-center gap-4">
             {isTranscribing ? (
