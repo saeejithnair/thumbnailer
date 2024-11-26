@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from './ui/scroll-area';
 import ReactDiffViewer from 'react-diff-viewer-continued';
 import { TranscriptWord } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 interface TranscriptEditorProps {
   transcript: string;
@@ -15,6 +16,7 @@ interface TranscriptEditorProps {
     feedback: string;
     suggestedEdits: string;
   };
+  currentTime?: number;
 }
 
 export function TranscriptEditor({
@@ -22,7 +24,8 @@ export function TranscriptEditor({
   words,
   editedTranscript,
   onTranscriptEdit,
-  validation
+  validation,
+  currentTime = 0
 }: TranscriptEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editableText, setEditableText] = useState(editedTranscript || transcript);
@@ -34,6 +37,32 @@ export function TranscriptEditor({
   const handleSave = () => {
     onTranscriptEdit(editableText);
     setIsEditing(false);
+  };
+
+  const renderTranscriptLine = (line: string, index: number) => {
+    const timestampMatch = line.match(/^\[(\d{2}:\d{2}\.\d{2})\]/);
+    if (!timestampMatch) return <div key={index}>{line}</div>;
+
+    const timestamp = parseTimestamp(timestampMatch[1]);
+    const text = line.slice(timestampMatch[0].length);
+    
+    // Highlight the line if current time falls within its 7-second window
+    const isActive = currentTime >= timestamp && currentTime < timestamp + 7;
+
+    return (
+      <div 
+        key={index} 
+        className={cn(
+          "flex gap-2",
+          isActive && "bg-purple-500/20 rounded"
+        )}
+      >
+        <span className="text-muted-foreground whitespace-nowrap">
+          {timestampMatch[1]}
+        </span>
+        <span>{text}</span>
+      </div>
+    );
   };
 
   return (
@@ -60,32 +89,9 @@ export function TranscriptEditor({
           </div>
         ) : (
           <ScrollArea className="h-[400px]">
-            {editedTranscript ? (
-              <ReactDiffViewer
-                oldValue={transcript}
-                newValue={editedTranscript}
-                splitView={false}
-                useDarkTheme={false}
-                showDiffOnly={false}
-              />
-            ) : (
-              <div className="space-y-1 font-mono text-sm">
-                {transcript.split('\n').map((line, index) => {
-                  const timestampMatch = line.match(/^\[(\d{2}:\d{2}\.\d{2})\]/);
-                  if (timestampMatch) {
-                    return (
-                      <div key={index} className="flex gap-2">
-                        <span className="text-muted-foreground whitespace-nowrap">
-                          {timestampMatch[1]}
-                        </span>
-                        <span>{line.slice(timestampMatch[0].length)}</span>
-                      </div>
-                    );
-                  }
-                  return <div key={index}>{line}</div>;
-                })}
-              </div>
-            )}
+            <div className="space-y-1 font-mono text-sm">
+              {transcript.split('\n').map((line, index) => renderTranscriptLine(line, index))}
+            </div>
           </ScrollArea>
         )}
 
@@ -104,4 +110,10 @@ export function TranscriptEditor({
       </div>
     </Card>
   );
+}
+
+function parseTimestamp(timestamp: string): number {
+  const [minutes, seconds] = timestamp.split(':');
+  const [secs, ms] = seconds.split('.');
+  return parseInt(minutes) * 60 + parseInt(secs) + parseInt(ms) / 100;
 }

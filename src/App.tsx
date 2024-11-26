@@ -34,6 +34,8 @@ function App() {
   // New state for transcript and PDF
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [pdfText, setPdfText] = useState<string | null>(null);
+  const [currentAudioFile, setCurrentAudioFile] = useState<File | null>(null);
+  const [currentAudioTime, setCurrentAudioTime] = useState(0);
 
   useEffect(() => {
     const updatedSession = sessions.find(s => s.id === currentSession.id);
@@ -109,11 +111,16 @@ function App() {
     }
   };
 
-  const handleTranscriptionComplete = (text: string, words: TranscriptWord[]) => {
+  const handleTranscriptionComplete = (text: string, words: TranscriptWord[], audioFile: File) => {
     setTranscript({
       text,
       words,
     });
+    setCurrentAudioFile(audioFile);
+  };
+
+  const handleTimeUpdate = (time: number) => {
+    setCurrentAudioTime(time);
   };
 
   const handlePDFLoaded = async (text: string) => {
@@ -242,7 +249,10 @@ function App() {
           <TabsContent value="transcript" className="space-y-6">
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-4">
-                <AudioTranscriber onTranscriptionComplete={handleTranscriptionComplete} />
+                <AudioTranscriber 
+                  onTranscriptionComplete={handleTranscriptionComplete}
+                  onTimeUpdate={handleTimeUpdate}
+                />
                 <PDFValidator onPDFLoaded={handlePDFLoaded} />
               </div>
               
@@ -254,6 +264,7 @@ function App() {
                     editedTranscript={transcript.editedText}
                     onTranscriptEdit={handleTranscriptEdit}
                     validation={transcript.pdfValidation}
+                    currentTime={currentAudioTime}
                   />
                 </div>
               )}

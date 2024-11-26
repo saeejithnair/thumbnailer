@@ -7,13 +7,20 @@ import { toast } from 'sonner';
 import { transcribeAudio } from '@/lib/api';
 import { TranscriptWord } from '@/lib/types';
 import { ScrollArea } from './ui/scroll-area';
+import { AudioPlayer } from './AudioPlayer';
 
 interface AudioTranscriberProps {
-  onTranscriptionComplete: (text: string, words: TranscriptWord[]) => void;
+  onTranscriptionComplete: (text: string, words: TranscriptWord[], audioFile: File) => void;
+  onTimeUpdate?: (currentTime: number) => void;
 }
 
-export function AudioTranscriber({ onTranscriptionComplete }: AudioTranscriberProps) {
+export function AudioTranscriber({ onTranscriptionComplete, onTimeUpdate }: AudioTranscriberProps) {
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [transcriptData, setTranscriptData] = useState<{
+    text: string;
+    words: TranscriptWord[];
+  } | null>(null);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -25,14 +32,17 @@ export function AudioTranscriber({ onTranscriptionComplete }: AudioTranscriberPr
     }
 
     setIsTranscribing(true);
+    setUploadedFile(file);
 
     try {
       const { text, words, formattedText } = await transcribeAudio(file);
-      onTranscriptionComplete(formattedText, words);
+      setTranscriptData({ text: formattedText, words });
+      onTranscriptionComplete(formattedText, words, file);
       toast.success('Transcription complete!');
     } catch (error) {
       toast.error('Failed to transcribe audio');
       console.error(error);
+      setUploadedFile(null);
     } finally {
       setIsTranscribing(false);
     }
@@ -49,38 +59,40 @@ export function AudioTranscriber({ onTranscriptionComplete }: AudioTranscriberPr
 
   return (
     <Card className="p-6">
-      <div
-        {...getRootProps()}
-        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-          ${isDragActive ? 'border-purple-500 bg-purple-500/10' : 'border-muted'}
-          ${isTranscribing ? 'opacity-50 cursor-not-allowed' : ''}
-        `}
-      >
-        <input {...getInputProps()} />
-        <div className="flex flex-col items-center gap-4">
-          {isTranscribing ? (
-            <>
-              <Loader2 className="h-12 w-12 text-purple-500 animate-spin" />
-              <p>Transcribing audio...</p>
-            </>
-          ) : (
-            <>
-              <FileAudio className="h-12 w-12 text-muted-foreground" />
-              <div>
-                <p className="text-lg font-medium">
-                  {isDragActive ? 'Drop the audio file here' : 'Drag & drop an audio file'}
+      {uploadedFile && transcriptData ? (
+        <AudioPlayer 
+          audioFile={uploadedFile}
+          words={transcriptData.words}
+          onTimeUpdate={onTimeUpdate}
+        />
+      ) : (
+        <div {...getRootProps()}>
+          <input {...getInputProps()} />
+          <div className="flex flex-col items-center gap-4">
+            {isTranscribing ? (
+              <>
+                <Loader2 className="h-12 w-12 text-purple-500 animate-spin" />
+                <p>Transcribing audio...</p>
+              </>
+            ) : (
+              <>
+                <FileAudio className="h-12 w-12 text-muted-foreground" />
+                <div>
+                  <p className="text-lg font-medium">
+                    {isDragActive ? 'Drop the audio file here' : 'Drag & drop an audio file'}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    or click to select a file
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Supports MP3, WAV, M4A, and OGG
                 </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  or click to select a file
-                </p>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Supports MP3, WAV, M4A, and OGG
-              </p>
-            </>
-          )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </Card>
   );
 }
