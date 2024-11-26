@@ -54,7 +54,7 @@ export function TranscriptEditor({
             <Textarea
               value={editableText}
               onChange={(e) => setEditableText(e.target.value)}
-              className="min-h-[300px]"
+              className="min-h-[300px] font-mono text-sm"
             />
             <Button onClick={handleSave}>Save Changes</Button>
           </div>
@@ -69,16 +69,21 @@ export function TranscriptEditor({
                 showDiffOnly={false}
               />
             ) : (
-              <div className="space-y-2">
-                {words.map((word, index) => (
-                  <span
-                    key={index}
-                    className="inline-block mr-1"
-                    title={`${word.start.toFixed(2)}s - ${word.end.toFixed(2)}s`}
-                  >
-                    {word.word}
-                  </span>
-                ))}
+              <div className="space-y-1 font-mono text-sm">
+                {transcript.split('\n').map((line, index) => {
+                  const timestampMatch = line.match(/^\[(\d{2}:\d{2}\.\d{2})\]/);
+                  if (timestampMatch) {
+                    return (
+                      <div key={index} className="flex gap-2">
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          {timestampMatch[1]}
+                        </span>
+                        <span>{line.slice(timestampMatch[0].length)}</span>
+                      </div>
+                    );
+                  }
+                  return <div key={index}>{line}</div>;
+                })}
               </div>
             )}
           </ScrollArea>

@@ -25,11 +25,10 @@ export function AudioTranscriber({ onTranscriptionComplete }: AudioTranscriberPr
     }
 
     setIsTranscribing(true);
-    toast.loading('Transcribing audio...');
 
     try {
-      const { text, words } = await transcribeAudio(file);
-      onTranscriptionComplete(text, words);
+      const { text, words, formattedText } = await transcribeAudio(file);
+      onTranscriptionComplete(formattedText, words);
       toast.success('Transcription complete!');
     } catch (error) {
       toast.error('Failed to transcribe audio');

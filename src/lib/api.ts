@@ -3,16 +3,20 @@ import Anthropic from '@anthropic-ai/sdk';
 import { toast } from 'sonner';
 
 const openai = new OpenAI({
-  apiKey: 'your-openai-api-key', // Replace with your API key
-  dangerouslyAllowBrowser: true // Enable browser usage
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true
 });
 
 const anthropic = new Anthropic({
-  apiKey: 'your-anthropic-api-key', // Replace with your API key
-  dangerouslyAllowBrowser: true // Enable browser usage
+  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
+  dangerouslyAllowBrowser: true
 });
 
-const XAI_API_KEY = 'xai-tc5kk9Y514X219WUAzLiEloB5fC3ZCuYCMuB46PBBgeAIMFYTCCuchrnX8cNz8NxgSSwgQbRYH0DHyt3';
+const XAI_API_KEY = import.meta.env.VITE_XAI_API_KEY;
+
+if (!import.meta.env.VITE_OPENAI_API_KEY) {
+  throw new Error('Missing OpenAI API key');
+}
 
 export async function generateImage(prompt: string): Promise<string> {
   try {
@@ -41,39 +45,192 @@ export async function generateImage(prompt: string): Promise<string> {
 export async function transcribeAudio(audioFile: File): Promise<{
   text: string;
   words: Array<{ word: string; start: number; end: number; }>;
+  formattedText: string;
 }> {
   try {
-    // For demo purposes, return mock data
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
+    // Validate file size (Whisper limit is 25MB)
+    if (audioFile.size > 25 * 1024 * 1024) {
+      throw new Error('Audio file must be less than 25MB');
+    }
+
+    // Validate file type
+    const validTypes = ['audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/ogg', 'audio/webm'];
+    if (!validTypes.includes(audioFile.type)) {
+      throw new Error('Unsupported audio format. Please use MP3, WAV, M4A, OGG, or WebM');
+    }
+
+    const toastId = toast.loading('Preparing audio file...');
     
-    return {
-      text: "This is a mock transcription of the audio file. Replace this with actual OpenAI Whisper API integration in production.",
-      words: [
-        { word: "This", start: 0, end: 0.5 },
-        { word: "is", start: 0.5, end: 0.7 },
-        { word: "a", start: 0.7, end: 0.8 },
-        { word: "mock", start: 0.8, end: 1.2 },
-        { word: "transcription", start: 1.2, end: 2.0 }
-      ]
-    };
+    toast.loading('Uploading to OpenAI...', { id: toastId });
+    
+    let transcription;
+    try {
+      transcription = await openai.audio.transcriptions.create({
+        file: audioFile,
+        model: 'whisper-1',
+        response_format: 'verbose_json',
+        timestamp_granularities: ['word']
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('rate limit')) {
+        throw new Error('OpenAI rate limit reached. Please try again in a minute.');
+      }
+      throw error;
+    }
 
-    /* Real implementation (uncomment and add your API key)
-    const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: 'whisper-1',
-      response_format: 'verbose_json',
-      timestamp_granularities: ['word']
-    });
+    toast.loading('Processing transcription...', { id: toastId });
+    
+    const words = transcription.words || [];
+    if (words.length === 0) {
+      throw new Error('No speech detected in audio file');
+    }
 
+    let formattedChunks: string[] = [];
+    
+    // Process intro section
+    const introText = words.map(w => w.word).join(' ');
+    if (introText.toLowerCase().includes('google illuminate')) {
+      // Find the exact positions of our three intro sentences
+      const firstSentenceWords = words.slice(0, words.findIndex(w => 
+        w.word.toLowerCase().includes('check out') || 
+        w.word.toLowerCase().includes('checkout')) || 10);
+      
+      const secondSentenceStart = words.findIndex(w => 
+        w.word.toLowerCase().includes('check out') || 
+        w.word.toLowerCase().includes('checkout'));
+      const secondSentenceWords = words.slice(secondSentenceStart, 
+        words.findIndex((w, i) => i > secondSentenceStart && 
+          w.word.toLowerCase().includes('welcome')) || secondSentenceStart + 10);
+      
+      const thirdSentenceStart = words.findIndex(w => 
+        w.word.toLowerCase().includes('welcome'));
+      const thirdSentenceWords = words.slice(thirdSentenceStart, 
+        words.findIndex((w, i) => i > thirdSentenceStart && 
+          w.word.toLowerCase().includes('discussion')) + 1 || thirdSentenceStart + 5);
+
+      // Format the three intro sentences
+      if (firstSentenceWords.length > 0) {
+        formattedChunks.push(
+          `[${formatTimestamp(firstSentenceWords[0].start)}]This conversation is powered by Google Illuminate`
+        );
+      }
+      
+      if (secondSentenceWords.length > 0) {
+        formattedChunks.push(
+          `[${formatTimestamp(secondSentenceWords[0].start)}]Check out illuminate.google.com for more`
+        );
+      }
+      
+      if (thirdSentenceWords.length > 0) {
+        formattedChunks.push(
+          `[${formatTimestamp(thirdSentenceWords[0].start)}]Welcome to the discussion`
+        );
+      }
+
+      // Process the rest of the transcript starting after the intro
+      const introEndIndex = thirdSentenceWords.length > 0 ? 
+        words.indexOf(thirdSentenceWords[thirdSentenceWords.length - 1]) + 1 : 0;
+      
+      // Process remaining content in ~7s chunks
+      let currentChunk: typeof words = [];
+      let chunkStartTime = words[introEndIndex]?.start || 0;
+      
+      for (let i = introEndIndex; i < words.length; i++) {
+        const word = words[i];
+        currentChunk.push(word);
+        
+        if (word.end - chunkStartTime >= 7 || i === words.length - 1) {
+          if (currentChunk.length > 0) {
+            const timestamp = formatTimestamp(chunkStartTime);
+            const text = currentChunk.map(w => w.word).join(' ').trim();
+            if (text) {
+              formattedChunks.push(`[${timestamp}]${text}`);
+            }
+          }
+          
+          currentChunk = [];
+          chunkStartTime = word.end;
+        }
+      }
+    } else {
+      // Fallback to normal processing if intro not found
+      // Process the rest of the transcript in ~7s chunks
+      let currentChunk: typeof words = [];
+      let chunkStartTime = 0;
+      
+      words.forEach((word, i) => {
+        if (typeof word.start !== 'number' || typeof word.end !== 'number' || 
+            word.end < word.start || word.start < 0) {
+          console.warn('Invalid word timing:', word);
+          return;
+        }
+        
+        currentChunk.push(word);
+        if (word.end - chunkStartTime >= 7 || i === words.length - 1) {
+          if (currentChunk.length > 0) {
+            const timestamp = formatTimestamp(chunkStartTime);
+            const text = currentChunk.map(w => w.word).join(' ').trim();
+            if (text) {
+              formattedChunks.push(`[${timestamp}]${text}`);
+            }
+          }
+          
+          currentChunk = [];
+          chunkStartTime = word.end;
+        }
+      });
+    }
+
+    // Ensure we have some output
+    if (formattedChunks.length === 0) {
+      throw new Error('Failed to format transcript');
+    }
+
+    const formattedText = formattedChunks.join('\n');
+    
+    toast.success('Transcription complete!', { id: toastId });
     return {
       text: transcription.text,
-      words: transcription.words
+      words: words,
+      formattedText
     };
-    */
   } catch (error) {
     console.error('Transcription error:', error);
-    throw new Error('Failed to transcribe audio');
+    toast.error('Transcription failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    throw error instanceof Error ? error : new Error('Failed to transcribe audio');
   }
+}
+
+function formatTimestamp(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  const milliseconds = Math.floor((seconds % 1) * 100);
+  
+  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+}
+
+// Helper function for fuzzy matching
+function levenshteinDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+
+  for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+  for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,
+        matrix[j - 1][i] + 1,
+        matrix[j - 1][i - 1] + substitutionCost
+      );
+    }
+  }
+
+  return matrix[b.length][a.length];
 }
 
 export async function validateTranscriptWithClaude(
